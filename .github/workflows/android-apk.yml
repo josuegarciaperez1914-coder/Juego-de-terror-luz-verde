@@ -1,10 +1,10 @@
-name: Build SUEÑO VHS Android APK
+name: Build SUEÑO VHS Capacitor APK
 
 on:
   push:
     branches: [main]
     paths:
-      - 'SUEÑO_VHS_GITHUB_25MB.zip'
+      - 'SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
@@ -14,10 +14,24 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify exact requested archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE='SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip'
+          test -f "$ARCHIVE" || { echo "::error::No existe el ZIP solicitado: $ARCHIVE"; exit 1; }
+          echo "Compilando exclusivamente: $ARCHIVE"
+          sha256sum "$ARCHIVE"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -32,77 +46,70 @@ jobs:
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Extract project archive
+      - name: Extract only requested archive
         shell: bash
         run: |
           set -euo pipefail
-          test -f 'SUEÑO_VHS_GITHUB_25MB.zip'
           mkdir -p unpacked
-          unzip -q 'SUEÑO_VHS_GITHUB_25MB.zip' -d unpacked
-          echo "Archive extracted. Top-level contents:"
-          find unpacked -maxdepth 3 -type f | head -80
+          unzip -q 'SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip' -d unpacked
+          find unpacked -maxdepth 4 -type f | head -100
 
-      - name: Locate Android Gradle project
+      - name: Locate Capacitor web project
         id: project
         shell: bash
         run: |
           set -euo pipefail
-          WRAPPER="$(find unpacked -type f -name gradlew -print -quit)"
-          if [ -n "$WRAPPER" ]; then
-            PROJECT_DIR="$(dirname "$WRAPPER")"
-            echo "wrapper=true" >> "$GITHUB_OUTPUT"
-          else
-            SETTINGS="$(find unpacked -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
-            if [ -n "$SETTINGS" ]; then
-              PROJECT_DIR="$(dirname "$SETTINGS")"
-            else
-              BUILD="$(find unpacked -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit)"
-              if [ -z "$BUILD" ]; then
-                echo "::error::No se encontró un proyecto Gradle/Android dentro del ZIP."
-                exit 1
-              fi
-              PROJECT_DIR="$(dirname "$BUILD")"
-            fi
-            echo "wrapper=false" >> "$GITHUB_OUTPUT"
+          PACKAGE="$(find unpacked -type f -name package.json -not -path '*/node_modules/*' -print -quit)"
+          if [ -z "$PACKAGE" ]; then
+            echo "::error::El ZIP exacto no contiene package.json."
+            exit 1
           fi
+          PROJECT_DIR="$(dirname "$PACKAGE")"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Proyecto localizado en: $PROJECT_DIR"
+          echo "Proyecto seleccionado dentro del ZIP exacto: $PROJECT_DIR"
+          if [ ! -f "$PROJECT_DIR/capacitor.config.ts" ] && [ ! -f "$PROJECT_DIR/capacitor.config.json" ] && [ ! -f "$PROJECT_DIR/capacitor.config.js" ]; then
+            echo "::error::No se encontró capacitor.config en el proyecto del ZIP."
+            exit 1
+          fi
 
-      - name: Set up Gradle when wrapper is missing
-        if: steps.project.outputs.wrapper == 'false'
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Build debug APK
-        shell: bash
+      - name: Install web dependencies and build
         working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          else
-            gradle --no-daemon assembleDebug
-          fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build
+
+      - name: Prepare and sync Android project
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+          test -f android/gradlew || { echo "::error::Capacitor no generó android/gradlew."; exit 1; }
+
+      - name: Build installable debug APK
+        working-directory: ${{ steps.project.outputs.dir }}/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
 
       - name: Collect APK
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p apk-output
-          find unpacked -type f -path '*/build/outputs/apk/*/*.apk' -name '*debug*.apk' -exec cp {} apk-output/ \;
-          if [ -z "$(find apk-output -type f -name '*.apk' -print -quit)" ]; then
-            echo "::error::La compilación terminó, pero no se encontró un APK debug."
-            find unpacked -type f -path '*/build/outputs/*' -print | head -100
-            exit 1
-          fi
+          find '${{ steps.project.outputs.dir }}/android' -type f -path '*/build/outputs/apk/*/*.apk' -name '*debug*.apk' -exec cp {} apk-output/ \;
+          test -n "$(find apk-output -type f -name '*.apk' -print -quit)" || { echo "::error::No se generó el APK."; exit 1; }
           ls -lh apk-output
 
-      - name: Upload installable APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: sueno-vhs-android-apk
+          name: sueno-vhs-capacitor-android-apk
           path: apk-output/*.apk
           if-no-files-found: error
           retention-days: 14
