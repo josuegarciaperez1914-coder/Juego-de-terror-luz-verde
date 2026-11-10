@@ -31,7 +31,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -39,12 +39,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Verify Android build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+          test "$NODE_MAJOR" -ge 22 || { echo "::error::Capacitor 8 requiere Node.js 22 o superior."; exit 1; }
+          java -version
+          test -d "${ANDROID_HOME}/platforms/android-36"
+          test -d "${ANDROID_HOME}/build-tools/36.0.0"
+          echo "Node.js, Java y Android SDK listos para Capacitor 8."
+
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Extract only requested archive
         shell: bash
