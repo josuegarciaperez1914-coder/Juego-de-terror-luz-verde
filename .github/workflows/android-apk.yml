@@ -1,0 +1,104 @@
+name: Build SUEÑO VHS Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SUEÑO_VHS_GITHUB_25MB.zip'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f 'SUEÑO_VHS_GITHUB_25MB.zip'
+          mkdir -p unpacked
+          unzip -q 'SUEÑO_VHS_GITHUB_25MB.zip' -d unpacked
+          echo "Archive extracted. Top-level contents:"
+          find unpacked -maxdepth 3 -type f | head -80
+
+      - name: Locate Android Gradle project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          WRAPPER="$(find unpacked -type f -name gradlew -print -quit)"
+          if [ -n "$WRAPPER" ]; then
+            PROJECT_DIR="$(dirname "$WRAPPER")"
+            echo "wrapper=true" >> "$GITHUB_OUTPUT"
+          else
+            SETTINGS="$(find unpacked -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+            if [ -n "$SETTINGS" ]; then
+              PROJECT_DIR="$(dirname "$SETTINGS")"
+            else
+              BUILD="$(find unpacked -type f \( -name build.gradle -o -name build.gradle.kts \) -print -quit)"
+              if [ -z "$BUILD" ]; then
+                echo "::error::No se encontró un proyecto Gradle/Android dentro del ZIP."
+                exit 1
+              fi
+              PROJECT_DIR="$(dirname "$BUILD")"
+            fi
+            echo "wrapper=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Proyecto localizado en: $PROJECT_DIR"
+
+      - name: Set up Gradle when wrapper is missing
+        if: steps.project.outputs.wrapper == 'false'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        shell: bash
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          set -euo pipefail
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            gradle --no-daemon assembleDebug
+          fi
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apk-output
+          find unpacked -type f -path '*/build/outputs/apk/*/*.apk' -name '*debug*.apk' -exec cp {} apk-output/ \;
+          if [ -z "$(find apk-output -type f -name '*.apk' -print -quit)" ]; then
+            echo "::error::La compilación terminó, pero no se encontró un APK debug."
+            find unpacked -type f -path '*/build/outputs/*' -print | head -100
+            exit 1
+          fi
+          ls -lh apk-output
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sueno-vhs-android-apk
+          path: apk-output/*.apk
+          if-no-files-found: error
+          retention-days: 14
