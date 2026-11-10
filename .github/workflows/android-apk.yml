@@ -1,10 +1,10 @@
-name: Build SUEÑO VHS Capacitor APK
+name: Build SUEÑO VHS CORREGIDO Capacitor APK
 
 on:
   push:
     branches: [main]
     paths:
-      - 'SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip'
+      - 'SUENO_VHS_GITHUB_CORREGIDO.zip'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE='SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip'
+          ARCHIVE='SUENO_VHS_GITHUB_CORREGIDO.zip'
           test -f "$ARCHIVE" || { echo "::error::No existe el ZIP solicitado: $ARCHIVE"; exit 1; }
           echo "Compilando exclusivamente: $ARCHIVE"
           sha256sum "$ARCHIVE"
@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p unpacked
-          unzip -q 'SUEÑO_VHS_25MB_CAPACITOR_VALLAS_MAX.zip' -d unpacked
+          unzip -q 'SUENO_VHS_GITHUB_CORREGIDO.zip' -d unpacked
           find unpacked -maxdepth 4 -type f | head -100
 
       - name: Locate Capacitor web project
@@ -121,7 +121,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: sueno-vhs-capacitor-android-apk
+          name: sueno-vhs-github-corregido-apk
           path: apk-output/*.apk
           if-no-files-found: error
           retention-days: 14
